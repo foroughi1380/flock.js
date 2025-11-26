@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <script src="FlockSingleton.js"></script>
+    <script src="FlockMember.js"></script>
+</head>
+<body>
+    <p id="thetxt">flasj;lasf</p>
+    <script>
+        let f = new FlockMember({
+            channelName  : "test",
+            debug : true
+        })
+        var isLeaderBefor = false
+        f.onLeadershipChange((leader_id)=>{
+            if(f.isLeader()){
+                isLeaderBefor = true;
+                document.querySelector("#thetxt").innerHTML = "now i'm leader"
+            }else if (isLeaderBefor){
+                document.querySelector("#thetxt").innerHTML = "leader changed to " + leader_id
+            }
+        })
+
+        f.onMessage((m)=>{
+            console.log(m)
+        })
+
+        window.flock = f;
+    </script>
+</body>
+</html>

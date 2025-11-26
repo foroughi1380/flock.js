@@ -1,0 +1,20 @@
+{
+  "name": "flock.js",
+  "version": "0.1.0",
+  "description": "Browser-based leader election for tabs, windows, and objects within the same origin.",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/foroughi1380/flock.js.git"
+  },
+  "author": "Mohammad Foroughi",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/foroughi1380/flock.js/issues"
+  },
+  "homepage": "https://github.com/foroughi1380/flock.js#readme"
+}
