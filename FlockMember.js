@@ -1,49 +1,81 @@
 /**
  * FlockMember.js
- * Universal Member Class with Request Retry Queue
+ * Universal Member Class
+ * Features: Retry Queue, One-way Messages, Auto-Discovery
  */
 
 (function() {
-    // Dependency Injection Logic
-    let singleton;
+    let getFactory;
+
+    // تشخیص محیط و دریافت Factory
     if (typeof require === 'function' && typeof module !== 'undefined') {
-        singleton = require('./FlockSingleton.js');
+        const mod = require('./FlockSingleton.js');
+        getFactory = mod.getFlockSingletonInstance;
     } else if (typeof window !== 'undefined') {
-        if (!window.FlockSingleton) {
-            throw new Error("FlockSingleton.js must be loaded before FlockMember.js");
-        }
-        singleton = window.FlockSingleton;
+        if (!window.getFlockSingletonInstance) throw new Error("FlockSingleton.js missing");
+        getFactory = window.getFlockSingletonInstance;
     }
 
     class FlockMember {
         constructor(options = {}) {
             this.id = 'mem_' + Math.random().toString(36).substr(2, 9);
             this.debug = options.debug || false;
+
+            // Callbacks
             this.callbacks = {};
-            this.pendingRequests = new Map(); // Requests waiting for response
-            this.retryQueue = new Map();     // Requests that timed out due to leader death
+
+            // Queues
+            this.pendingRequests = new Map();
+            this.retryQueue = new Map();
             this.MAX_RETRIES = 3;
 
-            if(this.debug) console.log(`[${this.id}] Member Created`);
-            singleton.register(this);
+            // دریافت موتور سینگلتون مربوط به این کانال خاص
+            this.singleton = getFactory({
+                channelName: options.channelName,
+                heartbeatInterval: options.heartbeatInterval,
+                heartbeatTtl: options.heartbeatTtl
+            });
+
+            if(this.debug) console.log(`[${this.id}] Member joined channel: ${this.singleton.CHANNEL_NAME}`);
+
+            // ثبت نام خودکار (این باعث شروع پروسه انتخاب لیدر می‌شود)
+            this.singleton.register(this);
         }
 
-        // اصلاح شده برای هندل کردن زمان‌بندی و انتقال به صف ارسال مجدد
-        sendRequest(data, callback) {
+        /**
+         * ارسال درخواست با قابلیت تنظیم زمان انتظار (Timeout)
+         * @param {any} data - داده‌های درخواست
+         * @param {Object|Function} options - (اختیاری) تنظیمات یا کال‌بک. مثلا { timeout: 20000 }
+         * @param {Function} callback - (اختیاری) کال‌بک سنتی
+         */
+        sendRequest(data, options = {}, callback = null) {
+            // هندل کردن آرگومان‌ها (اگر options تابع بود، یعنی کاربر timeout نداده و مستقیم callback داده)
+            if (typeof options === 'function') {
+                callback = options;
+                options = {};
+            }
+
             const reqId = Math.random().toString(36).substr(2);
+
+            // زمان انتظار: یا کاربر مشخص کرده، یا پیش‌فرض (TTL + 500ms)
+            // اگر عملیات سنگین دارید، عدد بزرگتری بفرستید
+            const requestTimeoutMs = options.timeout || (this.singleton.HEARTBEAT_TTL + 500);
 
             const promise = new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
                     if (this.pendingRequests.has(reqId)) {
                         this.pendingRequests.delete(reqId);
-                        // درخواست به جای Reject شدن، به صف ارسال مجدد می‌رود
-                        this._addRequestToRetryQueue(reqId, data, resolve, reject, callback);
+
+                        // نکته مهم: اگر تایم‌اوت دستی کاربر (مثلا 20 ثانیه) تمام شد،
+                        // باز هم می‌فرستیم به Retry Queue. چون شاید واقعا لیدر مرده بوده.
+                        // اما اگر لیدر فقط کند بوده، اینجا دیگه کاریش نمیشه کرد (Timeout واقعی).
+                        this._addToRetryQueue(reqId, data, 'request', resolve, reject, callback);
                     }
-                }, singleton.HEARTBEAT_TTL + 500); // 5.5 ثانیه انتظار برای پاسخ
+                }, requestTimeoutMs);
 
-                this.pendingRequests.set(reqId, { resolve, reject, timeout });
+                this.pendingRequests.set(reqId, { isMessage: false, resolve, reject, timeout });
 
-                singleton.broadcastInternal({
+                this.singleton.broadcastInternal({
                     type: 'request',
                     senderId: this.id,
                     requestId: reqId,
@@ -57,115 +89,128 @@
             return promise;
         }
 
-        // --- Listener Overrides ---
+        // --- ارسال پیام یک‌طرفه به لیدر (Message) با قابلیت Retry ---
+        sendMessageToLeader(data) {
+            const reqId = Math.random().toString(36).substr(2);
+
+            // اینجا هم Timeout می‌گذاریم تا اگر لیدر نبود، در صف نگه داریم
+            const timeout = setTimeout(() => {
+                if (this.pendingRequests.has(reqId)) {
+                    this.pendingRequests.delete(reqId);
+                    this._addToRetryQueue(reqId, data, 'message-to-leader', null, null, null);
+                }
+            }, this.singleton.HEARTBEAT_TTL + 500);
+
+            this.pendingRequests.set(reqId, { isMessage: true, timeout });
+
+            this.singleton.broadcastInternal({
+                type: 'message-to-leader',
+                senderId: this.id,
+                requestId: reqId,
+                payload: data
+            });
+        }
+
+        // --- Listeners ---
         onMessage(cb) { this.callbacks.onMessage = cb; }
         onRequest(cb) { this.callbacks.onRequest = cb; }
 
-        // اصلاح شده برای اجرای منطق ارسال مجدد پس از تغییر لیدر
         onLeadershipChange(cb) {
             this.callbacks.onLeadershipChange = (isLeader) => {
-                if (!isLeader) {
-                    this._retryPendingRequests();
-                }
+                // اگر لیدر عوض شد، صف را خالی کن (ارسال مجدد)
+                this._processRetryQueue();
                 if (cb) cb(isLeader);
             };
         }
 
         // --- Leader Actions ---
         sendToMember(id, data) {
-            if(this.isLeader()) singleton.broadcastInternal({ type: 'direct-message', senderId: this.id, targetId: id, payload: data });
+            if(this.isLeader()) this.singleton.broadcastInternal({ type: 'direct-message', senderId: this.id, targetId: id, payload: data });
         }
         broadcastToMembers(data) {
-            if(this.isLeader()) singleton.broadcastInternal({ type: 'broadcast', senderId: this.id, payload: data });
+            if(this.isLeader()) this.singleton.broadcastInternal({ type: 'broadcast', senderId: this.id, payload: data });
         }
 
-        isLeader() { return singleton.leaderId === this.id; }
-        getMembersInfo() { return this.isLeader() ? singleton.getGlobalMembers() : []; }
-        resign() { singleton.unregister(this.id); }
+        isLeader() { return this.singleton.leaderId === this.id; }
+        getMembersInfo() { return this.isLeader() ? this.singleton.getGlobalMembers() : []; }
+        resign() { this.singleton.unregister(this.id); }
 
-        // --- Retry Queue Logic ---
+        // --- Internal: Retry Queue Logic ---
 
-        _addRequestToRetryQueue(reqId, data, resolve, reject, callback) {
-            if (this.debug) console.log(`[${this.id}] Request ${reqId} timed out. Adding to retry queue.`);
-            this.retryQueue.set(reqId, { data, resolve, reject, callback, retries: 0 });
+        _addToRetryQueue(reqId, data, type, resolve, reject, callback) {
+            if (this.debug) console.log(`[${this.id}] ${type} ${reqId} timed out. Queued for retry.`);
+            this.retryQueue.set(reqId, { type, data, resolve, reject, callback, retries: 0 });
         }
 
-        _retryPendingRequests() {
+        _processRetryQueue() {
             if (this.retryQueue.size === 0) return;
 
-            // اگر خودم لیدر شدم، درخواست‌هایی که برای لیدر قبلی فرستادم، دیگر پاسخ داده نخواهند شد.
+            // اگر خودم لیدر شدم، درخواست‌های قبلی من به لیدر (که خودم هستم) معنا ندارد، پس پاک می‌کنیم
             if (this.isLeader()) {
-                if (this.debug) console.log(`[${this.id}] I am the new leader, clearing retry queue.`);
+                if (this.debug) console.log(`[${this.id}] I became leader. Clearing retry queue.`);
                 this.retryQueue.clear();
                 return;
             }
 
-            if (this.debug) console.log(`[${this.id}] New leader detected. Retrying ${this.retryQueue.size} requests.`);
+            if (this.debug) console.log(`[${this.id}] New leader found. Retrying ${this.retryQueue.size} items.`);
 
-            // برای جلوگیری از Loop، ابتدا صف را کپی و پاک می‌کنیم.
-            const requestsToRetry = Array.from(this.retryQueue.entries());
+            const items = Array.from(this.retryQueue.entries());
             this.retryQueue.clear();
 
-            requestsToRetry.forEach(([reqId, reqInfo]) => {
-                reqInfo.retries++;
-                if (reqInfo.retries > this.MAX_RETRIES) {
-                    reqInfo.reject(new Error(`Request ${reqId} failed after ${this.MAX_RETRIES} retries.`));
+            items.forEach(([reqId, item]) => {
+                item.retries++;
+                if (item.retries > this.MAX_RETRIES) {
+                    if (item.reject) item.reject(new Error(`Failed after ${this.MAX_RETRIES} retries`));
                     return;
                 }
 
-                // ارسال مجدد درخواست
-                this._resendRequest(reqId, reqInfo);
+                // ارسال مجدد
+                this._resendItem(reqId, item);
             });
         }
 
-        _resendRequest(reqId, reqInfo) {
-            // ساخت promise جدید و timeout جدید
-            const newPromise = new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    if (this.pendingRequests.has(reqId)) {
-                        this.pendingRequests.delete(reqId);
-                        // شکست مجدد: اضافه کردن به صف برای تلاش بعدی (با افزایش retries)
-                        this.retryQueue.set(reqId, reqInfo);
-                    }
-                }, singleton.HEARTBEAT_TTL + 500);
+        _resendItem(reqId, item) {
+            const timeout = setTimeout(() => {
+                if (this.pendingRequests.has(reqId)) {
+                    this.pendingRequests.delete(reqId);
+                    this.retryQueue.set(reqId, item); // دوباره به صف برمی‌گردد
+                }
+            }, this.singleton.HEARTBEAT_TTL + 500);
 
-                this.pendingRequests.set(reqId, { resolve, reject, timeout });
-
-                // ارسال به شبکه
-                singleton.broadcastInternal({
-                    type: 'request',
-                    senderId: this.id,
-                    requestId: reqId,
-                    payload: reqInfo.data
-                });
+            this.pendingRequests.set(reqId, {
+                isMessage: (item.type === 'message-to-leader'),
+                resolve: item.resolve,
+                reject: item.reject,
+                timeout
             });
 
-            // پیوند دادن Promise جدید به resolve/reject اولیه کاربر
-            newPromise.then(reqInfo.resolve).catch(reqInfo.reject);
+            this.singleton.broadcastInternal({
+                type: item.type,
+                senderId: this.id,
+                requestId: reqId,
+                payload: item.data
+            });
         }
 
-        // فراخوانی شده توسط Singleton برای حل و فصل درخواست‌ها
         resolvePending(reqId, data, isFinal) {
             if (this.pendingRequests.has(reqId)) {
                 const p = this.pendingRequests.get(reqId);
                 clearTimeout(p.timeout);
 
-                if (isFinal) {
-                    p.resolve(data);
-                    this.pendingRequests.delete(reqId);
-                } else {
-                    // اگر پاسخی در طول فرآیند ارسال مجدد رسید، آن را نهایی می‌کنیم.
-                    p.resolve(data);
+                if (p.isMessage) {
+                    this.pendingRequests.delete(reqId); // موفقیت پیام یک‌طرفه
+                } else if (isFinal && p.resolve) {
+                    p.resolve(data); // موفقیت درخواست
                     this.pendingRequests.delete(reqId);
                 }
             }
         }
     }
 
-    // Export Logic (UMD-like)
+    // Export Logic
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = FlockMember; // CommonJS (Node.js)
+        module.exports = FlockMember;
     } else if (typeof window !== 'undefined') {
-        window.FlockMember = FlockMember; // Browser Global
+        window.FlockMember = FlockMember;
     }
 })();

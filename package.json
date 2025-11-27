@@ -1,5 +1,5 @@
 {
-  "name": "flock.js",
+  "name": "flock-election",
   "version": "0.1.0",
   "description": "Browser-based leader election for tabs, windows, and objects within the same origin.",
   "main": "index.js",
@@ -16,5 +16,19 @@
   "bugs": {
     "url": "https://github.com/foroughi1380/flock.js/issues"
   },
+  "keywords": [
+    "leader-election",
+    "flock",
+    "broadcastchannel",
+    "distributed-system",
+    "singleton",
+    "multiton",
+    "browser",
+    "tab-sync",
+    "worker",
+    "cluster",
+    "lock",
+    "javascript"
+  ],
   "homepage": "https://github.com/foroughi1380/flock.js#readme"
 }

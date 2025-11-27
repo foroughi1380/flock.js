@@ -27,6 +27,11 @@
             console.log(m)
         })
 
+        f.onRequest((data , reply)=>{
+            console.log(data)
+            reply("bashe")
+        })
+
         window.flock = f;
     </script>
 </body>
