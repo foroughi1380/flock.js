@@ -50,7 +50,7 @@ To create a new member of the flock, you must instantiate `FlockMember` with you
 ### Member Creation Example
 
 ```javascript
-import FlockMember from 'flock.js'; 
+import FlockMember from 'flock-election'; 
 
 const myMember = new FlockMember({
     channelName: 'finance_dashboard', 
