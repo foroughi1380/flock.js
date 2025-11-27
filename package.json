@@ -1,6 +1,6 @@
 {
   "name": "flock-election",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browser-based leader election for tabs, windows, and objects within the same origin.",
   "main": "index.js",
   "type": "commonjs",
