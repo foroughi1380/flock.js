@@ -4,6 +4,7 @@
   "description": "Browser-based leader election for tabs, windows, and objects within the same origin.",
   "main": "index.js",
   "type": "commonjs",
+  "types": "index.d.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
