@@ -7,7 +7,9 @@
     <script src="FlockMember.js"></script>
 </head>
 <body>
-    <p id="thetxt">flasj;lasf</p>
+    <p id="thetxt">flasj;lasf</p> <br/>
+    <p id="thetxt2">flasj;lasf</p> <br/>
+    <p id="thetxt3">flasj;lasf</p> <br/>
     <script>
         let f = new FlockMember({
             channelName  : "test",
@@ -15,6 +17,7 @@
         })
         var isLeaderBefor = false
         f.onLeadershipChange((leader_id)=>{
+            console.log("f" , leader_id)
             if(f.isLeader()){
                 isLeaderBefor = true;
                 document.querySelector("#thetxt").innerHTML = "now i'm leader"
@@ -23,16 +26,43 @@
             }
         })
 
-        f.onMessage((m)=>{
-            console.log(m)
+
+        let f2 = new FlockMember({
+            channelName  : "test",
+            debug : true
+        })
+        var isLeaderBefor2 = false
+        f2.onLeadershipChange((leader_id)=>{
+            console.log("f2" , leader_id)
+            if(f2.isLeader()){
+                isLeaderBefor2 = true;
+                document.querySelector("#thetxt2").innerHTML = "now i'm leader"
+            }else if (isLeaderBefor2){
+                document.querySelector("#thetxt2").innerHTML = "leader changed to " + leader_id
+            }
         })
 
-        f.onRequest((data , reply)=>{
-            console.log(data)
-            reply("bashe")
+
+        let f3 = new FlockMember({
+            channelName  : "test",
+            debug : true
         })
+        var isLeaderBefor3 = false
+        f3.onLeadershipChange((leader_id)=>{
+            console.log("f3" , leader_id)
+            if(f3.isLeader()){
+                isLeaderBefor3 = true;
+                document.querySelector("#thetxt3").innerHTML = "now i'm leader"
+            }else if (isLeaderBefor3){
+                document.querySelector("#thetxt3").innerHTML = "leader changed to " + leader_id
+            }
+        })
+
+
 
         window.flock = f;
+        window.flock2 = f2;
+        window.flock3 = f3;
     </script>
 </body>
 </html>

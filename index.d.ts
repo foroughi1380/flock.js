@@ -40,6 +40,7 @@ declare module 'flock-election' {
         // --- Utilities ---
         isLeader(): boolean;
         resign(): void;
+        cedeLeadership() : void;
         getMembersInfo(): string[];
         sendToMember(id: string, data: any): void;
         broadcastToMembers(data: any): void;

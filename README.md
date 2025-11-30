@@ -1,8 +1,24 @@
-# 🚀 Flock.js: Micro-Service Leader Election for JavaScript Environments
+## 🐦 Flock.js (NPM : `flock-election`): Coordination and Leadership Across Browser Tabs & Process Instances
 
-**Flock.js** is a lightweight and robust library designed to implement the **Leader Election** algorithm in distributed JavaScript environments. It uses **BroadcastChannel** and **LocalStorage** (as a fallback) to synchronize state among browser tabs, windows, or even Web Workers.
+**Flock.js** is a lightweight and reliable library that enables your JavaScript application to work effectively in a **team environment** across **multiple tabs, windows, Web Workers, or even multiple instantiated members within a single JavaScript process.**
 
-By utilizing `Flock.js`, you ensure that at any given time, only **one "Member"** is responsible for critical tasks (such as reporting, database updates, or controlling shared resources).
+### 💡 The Problem: Chaos in a Distributed Environment
+
+Imagine your application has several active **instances** running simultaneously—whether they are spread across four **browser tabs** or represented by four distinct **FlockMember** objects within the same window. You don't want all of them to send an analytics report or execute a critical database update at the exact same time. If this happens, resources are wasted, and your data integrity is compromised (creating chaos).
+
+### ✨ The Solution: The Leader Election Algorithm
+
+**Flock.js** solves this problem by implementing the **Leader Election Algorithm**:
+
+1.  All active **instances** behave like members of a **"flock"**.
+2.  **Flock.js** quickly and reliably selects **only one** of these instances to be the **"Leader."**
+3.  The Leader is the **sole member** permitted to execute **critical and sensitive tasks** (such as sending important reports, performing database updates, or controlling shared resources).
+
+###  How It Works (Synchronization)
+
+This synchronization between instances is achieved using **internal browser communication channels (BroadcastChannel)**, or through **LocalStorage** as a fallback. This ensures that all members constantly know who the Leader is, and if the Leader fails or disconnects, a new Leader is immediately elected.
+
+**The Result**: Stable performance, resource savings, and the assurance that no critical task is ever performed more than **once**.
 
 -----
 
@@ -169,10 +185,11 @@ myMember.onMessage((message) => {
 
 ##  Utility Methods
 
-| Method | Description |
-| :--- | :--- |
-| `myMember.isLeader()` | Returns whether this instance is currently the Leader (`boolean`). |
-| `myMember.resign()` | Manually resigns the leadership role and triggers a new election. |
-| `myMember.getMembersInfo()` | (Leader Only) Returns a list of IDs of all active members in the flock (whose status is maintained within the TTL). |
-| `myMember.sendToMember(id, data)` | (Leader Only) Send a direct message to a specific member ID (no built-in retry). |
-| `myMember.broadcastToMembers(data)` | (Leader Only) Broadcast a message to all members of the flock (no built-in retry). |
+| Method | Description                                                                                                                                                                                                                                                                                  |
+| :--- |:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `myMember.isLeader()` | Returns whether this instance is currently the Leader (`boolean`).                                                                                                                                                                                                                           |
+| `myMember.resign()` | Permanently removes the member from the flock and stops all monitoring and participation. If the resigning member was the leader, this action triggers a new election. Use this method only when the member is intentionally shutting down or leaving the application entirely.              |
+| `myMember.cedeLeadership()` | (Leader Only) Voluntarily steps down from the leadership role, triggering a new election, while remaining an active member of the flock to receive subsequent updates. This method uses a Temporary Exclusion mechanism to prevent the ceding member from immediately reclaiming leadership. |
+| `myMember.getMembersInfo()` | (Leader Only) Returns a list of IDs of all active members in the flock (whose status is maintained within the TTL).                                                                                                                                                                          |
+| `myMember.sendToMember(id, data)` | (Leader Only) Send a direct message to a specific member ID (no built-in retry).                                                                                                                                                                                                             |
+| `myMember.broadcastToMembers(data)` | (Leader Only) Broadcast a message to all members of the flock (no built-in retry).                                                                                                                                                                                                           |
