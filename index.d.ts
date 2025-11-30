@@ -35,7 +35,7 @@ declare module 'flock-election' {
         // --- Listeners ---
         onRequest(callback: (data: any, reply: (response: any) => void) => void): void;
         onMessage(callback: (message: LeaderMessage) => void): void;
-        onLeadershipChange(callback: (isLeader: boolean) => void): void;
+        onLeadershipChange(callback: (leader_id: string) => void): void;
 
         // --- Utilities ---
         isLeader(): boolean;

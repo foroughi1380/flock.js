@@ -157,12 +157,14 @@ myMember.onRequest((data, reply) => {
 This event fires whenever your membership status changes (e.g., you become the Leader, or a new Leader is found).
 
 ```javascript
-myMember.onLeadershipChange((isLeader) => {
-    if (isLeader) {
-        console.log("🎉 I am the new Leader! Assuming critical responsibilities.");
+
+myMember.onLeadershipChange((leader_id) => {
+
+    if (myMember.isLeader()) {
+        console.log(`🎉 I am the new Leader! My ID: ${myMember.id}`);
         // Start Leader-specific timed tasks here
     } else {
-        console.log("Not the Leader. Stopping all Leader duties.");
+        console.log(`Not the Leader. New Leader ID is: ${leader_id}. Stopping all Leader duties.`);
         // Clear any timed loops or resources
     }
 });
