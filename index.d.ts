@@ -13,10 +13,10 @@ declare module 'flock-election' {
         timeout?: number;
     }
 
-    interface LeaderMessage {
+    interface MessageEnvelope {
         senderId: string;
-        payload: any;
         type: 'leader-message' | 'broadcast' | 'direct-message';
+        payload: any;
     }
 
     // The main class exported by the module
@@ -34,7 +34,7 @@ declare module 'flock-election' {
 
         // --- Listeners ---
         onRequest(callback: (data: any, reply: (response: any) => void) => void): void;
-        onMessage(callback: (message: LeaderMessage) => void): void;
+        onMessage(callback: (msg: MessageEnvelope) => void): void;
         onLeadershipChange(callback: (leader_id: string) => void): void;
 
         // --- Utilities ---

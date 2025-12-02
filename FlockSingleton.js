@@ -74,15 +74,34 @@
                 case 'heartbeat': this.handleHeartbeat(senderId); break;
                 case 'resign': this.handleResign(senderId); break;
                 case 'request': if (this.isLeaderState) this.distributeRequest(data); break;
+
                 case 'message-to-leader':
                     if (this.isLeaderState) {
                         this.distributeMessageToLeader(data);
                         this.broadcastInternal({ type: 'response', targetId: senderId, requestId: requestId, payload: null });
                     }
                     break;
+
                 case 'response': this.distributeResponse(data); break;
-                case 'broadcast': this.notifyLocal(null, 'onMessage', payload); break;
-                case 'direct-message': if (targetId) this.notifyLocal(targetId, 'onMessage', payload); break;
+
+                case 'broadcast':
+                    this.notifyLocal(null, 'onMessage', {
+                        senderId: senderId,
+                        type: 'broadcast',
+                        payload: payload
+                    });
+                    break;
+
+                case 'direct-message':
+                    if (targetId) {
+                        this.notifyLocal(targetId, 'onMessage', {
+                            senderId: senderId,
+                            type: 'direct-message',
+                            payload: payload
+                        });
+                    }
+                    break;
+
                 case 'request-leader-sync': if (this.isLeaderState) this.sendHeartbeat(); break;
             }
         }

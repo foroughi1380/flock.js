@@ -170,17 +170,40 @@ myMember.onLeadershipChange((leader_id) => {
 });
 ```
 
-### 3\. Listening for One-way Messages (`onMessage`)
 
-Messages sent via `sendMessageToLeader` are received in this event.
+## 📩 Handling Messages (Standardized Envelope)
+
+The `onMessage` method receives a unified **Message Envelope** for all communication types. This makes it easy to handle broadcasts, direct messages, and leader notifications in one place.
+
+| Property | Description |
+| :--- | :--- |
+| `senderId` | The ID of the member who sent the message. |
+| `type` | Can be `'broadcast'`, `'direct-message'`, or `'leader-message'`. |
+| `payload` | The actual data sent with the message. |
 
 ```javascript
-myMember.onMessage((message) => {
-    // message includes senderId, payload, and type: 'leader-message'
-    if (message.payload.level === 'ALERT') {
-        console.warn(`[Leader] Urgent Alert received from Member ${message.senderId}:`, message.payload);
+myMember.onMessage((msg) => {
+    // 'msg' is always an object: { senderId, type, payload }
+
+    switch (msg.type) {
+        case 'broadcast':
+            // Sent by Leader -> Received by All Members
+            console.log(`📢 Broadcast from Leader (${msg.senderId}):`, msg.payload);
+            break;
+
+        case 'direct-message':
+            // Sent by Leader -> Received by ONLY this Member
+            console.log(`📨 Private message from Leader (${msg.senderId}):`, msg.payload);
+            break;
+
+        case 'leader-message':
+            // Sent by a Member -> Received by the LEADER
+            // (Only triggers if myMember.isLeader() is true)
+            console.log(`🔔 Notification from Member (${msg.senderId}):`, msg.payload);
+            break;
     }
 });
+
 ```
 
 -----
