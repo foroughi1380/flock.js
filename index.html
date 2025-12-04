@@ -26,13 +26,17 @@
             }
         })
 
-        f.onMessage(m=>{
-            console.log(m)
-        })
+        f.sendMessageToLeader("test 1")
+        f.sendMessageToLeader("test 2")
+        f.sendMessageToLeader("test 3")
+        f.sendMessageToLeader("test 4")
+        f.sendMessageToLeader("test 5")
+
 
         f.onMessage(m=>{
             console.log(m)
         })
+
 
         f.onRequest((req , callback)=>{
             console.log(req)

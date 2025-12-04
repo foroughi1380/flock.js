@@ -1,6 +1,6 @@
 {
   "name": "flock-election",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A robust JavaScript library for implementing the Leader Election algorithm across distributed environments (tabs, windows, and processes). It ensures only one instance handles critical tasks and provides reliable inter-instance communication.",
   "main": "index.js",
   "type": "commonjs",

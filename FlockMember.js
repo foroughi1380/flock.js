@@ -1,22 +1,19 @@
 /**
  * FlockMember.js
- * Public API for User (Final Version with Retry Loop Fix and Enhanced Debug Logs).
+ * Public API for User
  */
 
 (function() {
     let getSingletonFactory;
 
-    // 1. Resolve Dependency (FlockSingleton)
     if (typeof require === 'function' && typeof module !== 'undefined') {
-        // Node.js
         try {
             const singletonModule = require('./FlockSingleton.js');
             getSingletonFactory = singletonModule.getFlockSingletonInstance;
         } catch (e) {
-            console.error("FlockMember Error: Could not require './FlockSingleton.js'. Make sure files are in the same directory.");
+            console.error("FlockMember Error: Could not require './FlockSingleton.js'.");
         }
     } else if (typeof window !== 'undefined') {
-        // Browser
         if (window.FlockSingletonFactory) {
             getSingletonFactory = window.FlockSingletonFactory;
         } else {
@@ -34,9 +31,12 @@
             this.retryQueue = new Map();
             this.MAX_RETRIES = 3;
 
+            // ذخیره آخرین لیدر شناخته شده برای جلوگیری از ارسال تکراری هنگام کشف اولیه
+            this.lastKnownLeaderId = null;
+
             this.singleton = getSingletonFactory(options);
 
-            this.RETRY_CHECK_INTERVAL = 5000; // 5 ثانیه
+            this.RETRY_CHECK_INTERVAL = 5000;
             this.retryTimer = null;
             this._startRetryLoop();
 
@@ -59,9 +59,20 @@
                         this._addToRetryQueue(reqId, data, 'request', resolve, reject, callback);
                     }
                 }, requestTimeoutMs);
-                this.pendingRequests.set(reqId, { isMessage: false, resolve, reject, timeout });
+
+                this.pendingRequests.set(reqId, {
+                    isMessage: false,
+                    type: 'request',
+                    data: data,
+                    resolve,
+                    reject,
+                    callback,
+                    timeout
+                });
+
                 this.singleton.broadcastInternal({ type: 'request', senderId: this.id, requestId: reqId, payload: data });
-                if (this.debug) console.log(`[${this.id}] Sending Request ${reqId}. Timeout set for ${requestTimeoutMs}ms.`);
+
+                if (this.debug) console.log(`[${this.id}] 📤 Sending Request ${reqId}. Timeout: ${requestTimeoutMs}ms`);
             });
 
             if (callback) { promise.then(res => callback(null, res)).catch(err => callback(err)); }
@@ -77,9 +88,16 @@
                 }
             }, this.singleton.HEARTBEAT_TTL + 500);
 
-            this.pendingRequests.set(reqId, { isMessage: true, timeout });
+            this.pendingRequests.set(reqId, {
+                isMessage: true,
+                type: 'message-to-leader',
+                data: data,
+                timeout
+            });
+
             this.singleton.broadcastInternal({ type: 'message-to-leader', senderId: this.id, requestId: reqId, payload: data });
-            if (this.debug) console.log(`[${this.id}] Sending MessageToLeader ${reqId}.`);
+
+            if (this.debug) console.log(`[${this.id}] 📤 Sending MessageToLeader ${reqId}.`);
         }
 
         onMessage(cb) { this.callbacks.onMessage = cb; }
@@ -87,8 +105,22 @@
 
         onLeadershipChange(cb) {
             this.callbacks.onLeadershipChange = (newLeaderId) => {
-                if (this.debug) console.log(`[${this.id}] 👑 Leadership changed. New Leader ID: ${newLeaderId}`);
-                this._processRetryQueue();
+                if (this.debug) console.log(`[${this.id}] 👑 Leadership update: ${this.lastKnownLeaderId} -> ${newLeaderId}`);
+
+                // منطق هوشمند برای Retry:
+                const amILeader = (newLeaderId === this.id);
+                const isJustDiscovery = (this.lastKnownLeaderId === null && newLeaderId !== null);
+
+                // فقط اگر "خودم لیدر شدم" یا "لیدر واقعاً عوض شد (نه کشف اولیه)" پیام‌ها را باز ارسال کن.
+                // اگر isJustDiscovery باشد، یعنی پیام اولیه ما احتمالاً رسیده است، پس عجله نکن.
+                if (amILeader || !isJustDiscovery) {
+                    this._movePendingToRetry();
+                    this._processRetryQueue();
+                } else {
+                    if (this.debug) console.log(`[${this.id}] Leader discovered. Waiting for ack on pending requests (No immediate retry).`);
+                }
+
+                this.lastKnownLeaderId = newLeaderId;
                 if (cb) cb(newLeaderId);
             };
         }
@@ -101,15 +133,10 @@
         }
 
         cedeLeadership() {
-            if (!this.isLeader()) {
-                if (this.debug) console.log(`[${this.id}] Cannot cede leadership, I am not the leader.`);
-                return;
-            }
-            const EXCLUSION_TIME_MS = 1500;
+            if (!this.isLeader()) return;
+            if (this.debug) console.log(`[${this.id}] ✋ Ceding leadership.`);
 
-            if (this.debug) console.log(`[${this.id}] ✋ Ceding leadership. Temporarily excluding self (${EXCLUSION_TIME_MS}ms) from next election.`);
-
-            this.singleton.setTemporaryExclusion(this.id, EXCLUSION_TIME_MS);
+            this.singleton.setTemporaryExclusion(this.id, 1500);
             this.singleton.broadcastInternal({ type: 'resign', senderId: this.id });
         }
 
@@ -117,67 +144,84 @@
         getMembersInfo() { return this.isLeader() ? this.singleton.getGlobalMembers() : []; }
 
         resign() {
-            if (this.debug) console.log(`[${this.id}] 👋 Resigning and permanently leaving the flock.`);
-
+            if (this.debug) console.log(`[${this.id}] 👋 Resigning permanently.`);
             this.singleton.unregister(this.id);
             if (this.retryTimer) clearInterval(this.retryTimer);
         }
 
-        // --- Internal Helpers (Retry Logic) ---
+        // --- Internal Helpers ---
 
         _startRetryLoop() {
             if (this.retryTimer) clearInterval(this.retryTimer);
             this.retryTimer = setInterval(() => {
                 if (this.singleton.leaderId && this.retryQueue.size > 0) {
-                    if (this.debug) console.log(`[${this.id}] 🔄 Retry Loop triggered. Processing queue...`);
+                    if (this.debug) console.log(`[${this.id}] 🔄 Retry Loop: Processing ${this.retryQueue.size} items...`);
                     this._processRetryQueue();
                 }
             }, this.RETRY_CHECK_INTERVAL);
         }
 
         _addToRetryQueue(reqId, data, type, resolve, reject, callback) {
-            if (this.debug) console.log(`[${this.id}] 🚨 ${type} ${reqId} timed out. Queued for retry.`);
+            if (this.debug) console.log(`[${this.id}] 🚨 ${type} ${reqId} timed out. Added to Retry Queue.`);
             this.retryQueue.set(reqId, { type, data, resolve, reject, callback, retries: 0 });
         }
 
         _processRetryQueue() {
             if (this.retryQueue.size === 0) return;
 
-            if (this.isLeader()) {
-                if (this.debug) console.log(`[${this.id}] I became leader. Clearing retry queue.`);
-                this.retryQueue.clear();
-                return;
-            }
+            if (this.debug) console.log(`[${this.id}] ⚙️ Processing Retry Queue (${this.retryQueue.size} items).`);
 
-            if (this.debug) console.log(`[${this.id}] Retrying ${this.retryQueue.size} items.`);
             const items = Array.from(this.retryQueue.entries());
             this.retryQueue.clear();
+
             items.forEach(([reqId, item]) => {
                 item.retries++;
                 if (item.retries > this.MAX_RETRIES) {
-                    if (this.debug) console.log(`[${this.id}] ❌ Request ${reqId} failed after ${this.MAX_RETRIES} retries. Dropping.`);
-                    if (item.reject) item.reject(new Error(`Request ${reqId} failed after ${this.MAX_RETRIES} retries.`));
+                    if (this.debug) console.error(`[${this.id}] ❌ ${item.type} ${reqId} failed after ${this.MAX_RETRIES} attempts. Dropping.`);
+                    if (item.reject) item.reject(new Error(`Max retries reached`));
                     return;
                 }
                 this._resendItem(reqId, item);
             });
         }
 
+        _movePendingToRetry() {
+            if (this.pendingRequests.size === 0) return;
+
+            if (this.debug) console.log(`[${this.id}] 📦 Moving ${this.pendingRequests.size} PENDING requests to Retry Queue.`);
+
+            this.pendingRequests.forEach((p, reqId) => {
+                clearTimeout(p.timeout);
+                this.retryQueue.set(reqId, {
+                    type: p.type,
+                    data: p.data,
+                    resolve: p.resolve,
+                    reject: p.reject,
+                    callback: p.callback,
+                    retries: 0
+                });
+            });
+            this.pendingRequests.clear();
+        }
+
         _resendItem(reqId, item) {
-            if (this.debug) console.log(`[${this.id}] Retrying ${item.type} ${reqId} (Attempt ${item.retries}/${this.MAX_RETRIES}).`);
+            if (this.debug) console.log(`[${this.id}] 🔁 Resending ${item.type} ${reqId} (Try ${item.retries}/${this.MAX_RETRIES})`);
 
             const timeout = setTimeout(() => {
                 if (this.pendingRequests.has(reqId)) {
                     this.pendingRequests.delete(reqId);
                     this.retryQueue.set(reqId, item);
-                    if (this.debug) console.log(`[${this.id}] Retried item ${reqId} timed out again. Re-queued.`);
+                    if (this.debug) console.log(`[${this.id}] ⚠️ Resent item ${reqId} timed out again.`);
                 }
             }, this.singleton.HEARTBEAT_TTL + 500);
 
             this.pendingRequests.set(reqId, {
                 isMessage: (item.type === 'message-to-leader'),
+                type: item.type,
+                data: item.data,
                 resolve: item.resolve,
                 reject: item.reject,
+                callback: item.callback,
                 timeout
             });
 
@@ -186,7 +230,7 @@
 
         resolvePending(reqId, data, isFinal) {
             if (this.pendingRequests.has(reqId)) {
-                if (this.debug) console.log(`[${this.id}] Received response for ${reqId}.`);
+                if (this.debug) console.log(`[${this.id}] ✅ Received response/ack for ${reqId}.`);
                 const p = this.pendingRequests.get(reqId);
                 clearTimeout(p.timeout);
                 if (p.isMessage) { this.pendingRequests.delete(reqId); }
